@@ -1,7 +1,7 @@
 {
   "name": "lsl-ticket-relay",
   "version": "1.0.0",
-  "description": "Relay LSL HTTP logs to Discord",
+  "description": "Relay logs from LSL to Discord",
   "main": "server.js",
   "type": "module",
   "scripts": {
