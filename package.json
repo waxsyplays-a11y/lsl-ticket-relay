@@ -1,17 +1,14 @@
 {
   "name": "lsl-ticket-relay",
   "version": "1.0.0",
-  "description": "Relay between Second Life LSL scripts and Discord",
+  "description": "Relay LSL HTTP logs to Discord",
   "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "node-fetch": "^3.3.2"
-  },
-  "engines": {
-    "node": ">=16.x"
+    "express": "^4.19.2",
+    "axios": "^1.6.8"
   }
 }
