@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Relay between Second Life LSL scripts and Discord",
   "main": "server.js",
+  "type": "module",
   "scripts": {
     "start": "node server.js"
   },
