@@ -4,33 +4,37 @@ import axios from "axios";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Replace with your actual Discord webhook URL
-const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK || "YOUR_DISCORD_WEBHOOK_URL";
+// 🔗 Set your Discord Webhook here
+const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK || "https://discord.com/api/webhooks/XXXX/XXXX";
 
 app.use(express.json());
 
-// Health check
-app.get("/", (req, res) => {
-  res.send("✅ EMARI Relay is running.");
-});
-
-// LSL logs endpoint
-app.post("/", async (req, res) => {
+// LSL will POST logs here
+app.post("/relay", async (req, res) => {
   try {
-    const log = req.body.log || "⚠️ Empty log received";
-    console.log("📩 Incoming log:", log);
+    const log = req.body.log;
 
+    if (!log) {
+      return res.status(400).json({ error: "Missing log field" });
+    }
+
+    // Send log to Discord
     await axios.post(DISCORD_WEBHOOK, {
       content: log
     });
 
-    res.status(200).send("✅ Log relayed to Discord");
+    console.log("✅ Log relayed to Discord:", log);
+    res.json({ status: "ok" });
   } catch (err) {
-    console.error("❌ Relay error:", err.message);
-    res.status(500).send("Relay error");
+    console.error("❌ Error relaying log:", err.message);
+    res.status(500).json({ error: "Failed to relay log" });
   }
 });
 
+app.get("/", (req, res) => {
+  res.send("✅ LSL Ticket Relay is running");
+});
+
 app.listen(PORT, () => {
-  console.log(`🚀 EMARI Relay running on port ${PORT}`);
+  console.log(`🚀 Relay server running on port ${PORT}`);
 });
