@@ -1,13 +1,11 @@
 {
   "name": "lsl-discord-relay",
   "version": "1.0.0",
-  "description": "Relay service to send Second Life LSL scanner logs to Discord",
   "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
+  "type": "module",
   "dependencies": {
-    "express": "^4.19.2",
-    "node-fetch": "^2.6.7"
+    "express": "^4.18.2",
+    "body-parser": "^1.20.2",
+    "node-fetch": "^3.3.2"
   }
 }
