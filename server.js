@@ -1,43 +1,43 @@
-import express from "express";
-import fetch from "node-fetch";
+// EMARI Discord Relay v5.0
+// Receives scan logs from LSL and forwards to Discord
+
+const express = require('express');
+const bodyParser = require('body-parser');
+const axios = require('axios');
 
 const app = express();
-app.use(express.json());
+const PORT = process.env.PORT || 3000;
 
-const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
+// 🔧 Replace with your actual Discord webhook URL
+const DISCORD_WEBHOOK = 'https://discord.com/api/webhooks/1421196532992049253/Lo4rVU2g_InE3yZXKNv2hypgkjQL80SthRODlCqVnbYZoh-5clKmXr0kmVYE2Z9o6Jqq';
 
-app.post("/relay", async (req, res) => {
-  try {
-    const { avatar, uuid, log } = req.body;
+app.use(bodyParser.json());
 
-    if (!avatar || !uuid || !log) {
-      return res.status(400).json({ error: "Missing avatar, uuid or log field" });
+app.post('/relay', async (req, res) => {
+    try {
+        const { event, log } = req.body;
+
+        if (!log) {
+            return res.status(400).send('Missing log message');
+        }
+
+        const timestamp = new Date().toISOString();
+        const content = `📡 **EMARI Scan Log**\n\n**Event:** ${event || 'Unknown'}\n**Time:** ${timestamp}\n**Message:**\n${decodeURIComponent(log)}`;
+
+        await axios.post(DISCORD_WEBHOOK, { content });
+
+        console.log(`[${timestamp}] Log relayed: ${log}`);
+        res.status(200).send('Log relayed to Discord');
+    } catch (err) {
+        console.error('Relay error:', err.message);
+        res.status(500).send('Internal server error');
     }
-
-    // Forward as plain content to ensure line breaks are preserved
-    const payload = {
-      content: log
-    };
-
-    const response = await fetch(DISCORD_WEBHOOK, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      return res.status(response.status).send(errText);
-    }
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("Relay error:", err);
-    res.status(500).json({ error: "Internal server error" });
-  }
 });
 
-const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => {
+    res.send('✅ EMARI Relay is running.');
+});
+
 app.listen(PORT, () => {
-  console.log(`✅ Relay listening on port ${PORT}`);
+    console.log(`🚀 EMARI Relay listening on port ${PORT}`);
 });
