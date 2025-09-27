@@ -1,6 +1,6 @@
-// server.js
-import express from "express";
-import fetch from "node-fetch";
+// server.js (CommonJS)
+const express = require("express");
+const fetch = require("node-fetch");
 
 const app = express();
 app.use(express.json());
@@ -16,7 +16,7 @@ app.post("/relay", async (req, res) => {
       return res.status(400).json({ error: "Missing log field" });
     }
 
-    // Build message content for Discord
+    // Build message for Discord
     let content = log;
     if (avatar) content += `\n👤 Avatar: ${avatar}`;
     if (reason) content += `\n📌 Reason: ${reason}`;
