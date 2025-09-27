@@ -1,40 +1,45 @@
+// server.js
 import express from "express";
-import axios from "axios";
+import fetch from "node-fetch";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-// 🔗 Set your Discord Webhook here
-const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK || "https://discord.com/api/webhooks/XXXX/XXXX";
-
 app.use(express.json());
 
-// LSL will POST logs here
+// Your Discord webhook URL
+const DISCORD_WEBHOOK = process.env.DISCORD_WEBHOOK;
+
 app.post("/relay", async (req, res) => {
   try {
-    const log = req.body.log;
+    const { log, avatar, reason } = req.body;
 
     if (!log) {
       return res.status(400).json({ error: "Missing log field" });
     }
 
-    // Send log to Discord
-    await axios.post(DISCORD_WEBHOOK, {
-      content: log
+    // Build message content for Discord
+    let content = log;
+    if (avatar) content += `\n👤 Avatar: ${avatar}`;
+    if (reason) content += `\n📌 Reason: ${reason}`;
+
+    // Send to Discord
+    const response = await fetch(DISCORD_WEBHOOK, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
     });
 
-    console.log("✅ Log relayed to Discord:", log);
-    res.json({ status: "ok" });
+    if (!response.ok) {
+      const text = await response.text();
+      console.error("Discord error:", text);
+      return res.status(500).json({ error: "Discord rejected message", details: text });
+    }
+
+    res.json({ ok: true });
   } catch (err) {
-    console.error("❌ Error relaying log:", err.message);
-    res.status(500).json({ error: "Failed to relay log" });
+    console.error("Relay error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("✅ LSL Ticket Relay is running");
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 Relay server running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Relay listening on port ${PORT}`));
