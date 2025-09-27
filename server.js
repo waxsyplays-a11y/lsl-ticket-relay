@@ -1,48 +1,42 @@
-const express = require("express");
-const bodyParser = require("body-parser");
-const fetch = require("node-fetch");
+import express from "express";
+import fetch from "node-fetch";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+app.use(express.json());
 
-// Parse JSON bodies
-app.use(bodyParser.json());
+const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
-// Relay endpoint
 app.post("/relay", async (req, res) => {
   try {
     const { avatar, uuid, reason, time } = req.body;
-
     if (!avatar || !uuid || !reason || !time) {
       return res.status(400).json({ error: "Missing avatar, uuid, reason, or time field" });
     }
 
-    // Format log
-    const logMessage = `🚨 EMARI Alert 🚨\n\n` +
-      `Avatar: ${avatar} (${uuid})\n` +
-      `Reason:\n${reason}\n` +
-      `Time: ${time}\n` +
-      `🚨 EMARI Alert 🚨`;
+    const content = `🚨 EMARI Alert 🚨
 
-    // Send to Discord webhook
-    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
-    if (!webhookUrl) {
-      return res.status(500).json({ error: "Missing DISCORD_WEBHOOK_URL env variable" });
-    }
+Avatar: ${avatar} (${uuid})
+Reason:
+${reason}
+Time: ${time}
+🚨 EMARI Alert 🚨`;
 
-    await fetch(webhookUrl, {
+    const response = await fetch(DISCORD_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: logMessage })
+      body: JSON.stringify({ content }),
     });
 
-    res.json({ success: true, relayed: logMessage });
+    if (!response.ok) {
+      const errorText = await response.text();
+      return res.status(response.status).json({ error: errorText });
+    }
+
+    res.json({ status: "ok" });
   } catch (err) {
-    console.error("Relay error:", err);
+    console.error(err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Relay server running on port ${PORT}`);
-});
+app.listen(3000, () => console.log("Relay server running on port 3000"));
