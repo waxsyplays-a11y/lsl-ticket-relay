@@ -2,41 +2,36 @@ import express from "express";
 import fetch from "node-fetch";
 
 const app = express();
+app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+const webhook = process.env.DISCORD_WEBHOOK_URL; // ✅ clearer name
+
+app.get("/", (req, res) => {
+  res.send("Relay is running ✅");
+});
 
 app.post("/relay", async (req, res) => {
+  const log = req.body.log || "No log received";
+
   try {
-    const { avatar, uuid, reason, time } = req.body;
-    if (!avatar || !uuid || !reason || !time) {
-      return res.status(400).json({ error: "Missing avatar, uuid, reason, or time field" });
-    }
-
-    const content = `🚨 EMARI Alert 🚨
-
-Avatar: ${avatar} (${uuid})
-Reason:
-${reason}
-Time: ${time}
-🚨 EMARI Alert 🚨`;
-
-    const response = await fetch(DISCORD_WEBHOOK_URL, {
+    const r = await fetch(webhook, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content: "```" + log + "```" })
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      return res.status(response.status).json({ error: errorText });
+    if (!r.ok) {
+      console.error("Discord error:", await r.text());
+      return res.status(500).send("Discord relay failed");
     }
 
-    res.json({ status: "ok" });
+    res.send("OK");
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("Relay error:", err);
+    res.status(500).send("Relay server error");
   }
 });
 
-app.listen(3000, () => console.log("Relay server running on port 3000"));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Relay running on port " + PORT));
