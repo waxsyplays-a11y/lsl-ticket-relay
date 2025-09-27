@@ -1,43 +1,48 @@
-// EMARI Discord Relay v5.0
-// Receives scan logs from LSL and forwards to Discord
-
-const express = require('express');
-const bodyParser = require('body-parser');
-const axios = require('axios');
+const express = require("express");
+const bodyParser = require("body-parser");
+const fetch = require("node-fetch");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 🔧 Replace with your actual Discord webhook URL
-const DISCORD_WEBHOOK = 'https://discord.com/api/webhooks/1421196532992049253/Lo4rVU2g_InE3yZXKNv2hypgkjQL80SthRODlCqVnbYZoh-5clKmXr0kmVYE2Z9o6Jqq';
-
+// Parse JSON bodies
 app.use(bodyParser.json());
 
-app.post('/relay', async (req, res) => {
-    try {
-        const { event, log } = req.body;
+// Relay endpoint
+app.post("/relay", async (req, res) => {
+  try {
+    const { avatar, uuid, reason, time } = req.body;
 
-        if (!log) {
-            return res.status(400).send('Missing log message');
-        }
-
-        const timestamp = new Date().toISOString();
-        const content = `📡 **EMARI Scan Log**\n\n**Event:** ${event || 'Unknown'}\n**Time:** ${timestamp}\n**Message:**\n${decodeURIComponent(log)}`;
-
-        await axios.post(DISCORD_WEBHOOK, { content });
-
-        console.log(`[${timestamp}] Log relayed: ${log}`);
-        res.status(200).send('Log relayed to Discord');
-    } catch (err) {
-        console.error('Relay error:', err.message);
-        res.status(500).send('Internal server error');
+    if (!avatar || !uuid || !reason || !time) {
+      return res.status(400).json({ error: "Missing avatar, uuid, reason, or time field" });
     }
-});
 
-app.get('/', (req, res) => {
-    res.send('✅ EMARI Relay is running.');
+    // Format log
+    const logMessage = `🚨 EMARI Alert 🚨\n\n` +
+      `Avatar: ${avatar} (${uuid})\n` +
+      `Reason:\n${reason}\n` +
+      `Time: ${time}\n` +
+      `🚨 EMARI Alert 🚨`;
+
+    // Send to Discord webhook
+    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+    if (!webhookUrl) {
+      return res.status(500).json({ error: "Missing DISCORD_WEBHOOK_URL env variable" });
+    }
+
+    await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: logMessage })
+    });
+
+    res.json({ success: true, relayed: logMessage });
+  } catch (err) {
+    console.error("Relay error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 app.listen(PORT, () => {
-    console.log(`🚀 EMARI Relay listening on port ${PORT}`);
+  console.log(`🚀 Relay server running on port ${PORT}`);
 });
