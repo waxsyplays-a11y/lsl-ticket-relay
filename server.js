@@ -1,30 +1,33 @@
+// server.js — EMARI Discord Relay (Render-Ready)
+
 import express from "express";
 import fetch from "node-fetch";
+import dotenv from "dotenv";
+
+dotenv.config(); // Load .env variables
 
 const app = express();
-app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Load environment variable
 const webhook = process.env.DISCORD_WEBHOOK_URL;
 if (!webhook) {
-  console.error("❌ Missing DISCORD_WEBHOOK_URL environment variable");
+  console.error("❌ DISCORD_WEBHOOK_URL is not set in environment");
   process.exit(1);
 }
 
-// Constants
 const COOLDOWN = 5 * 60 * 1000; // 5 minutes
-const seen = new Map(); // uuid -> { reason, lastTime }
+const seen = new Map(); // uuid → { reason, lastTime }
 
-// Routes
+// Root route
 app.get("/", (req, res) => {
-  res.send("✅ EMARI Relay is active");
+  res.send("✅ EMARI Relay is online");
 });
 
+// Relay endpoint
 app.post("/relay", async (req, res) => {
   const { avatar, uuid, reason, time } = req.body;
 
-  // Validate payload
   if (!avatar || !uuid || !reason || !time) {
     return res.status(400).json({
       error: "Missing required fields: avatar, uuid, reason, or time"
@@ -34,7 +37,6 @@ app.post("/relay", async (req, res) => {
   const now = Date.now();
   const previous = seen.get(uuid);
 
-  // Suppress duplicates
   if (previous && previous.reason === reason && now - previous.lastTime < COOLDOWN) {
     console.log(`⏩ Skipped duplicate alert for ${avatar} (${uuid})`);
     return res.send("Duplicate alert skipped");
@@ -68,10 +70,16 @@ app.post("/relay", async (req, res) => {
 
     console.log(`✅ Alert sent for ${avatar} (${uuid})`);
     res.send("Alert relayed successfully");
-  } catch (error) {
-    console.error("❌ Relay server error:", error);
+  } catch (err) {
+    console.error("🔥 Relay error:", err);
     res.status(500).send("Internal server error");
   }
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error("🔥 Uncaught error:", err);
+  res.status(500).send("Unexpected server error");
 });
 
 // Start server
