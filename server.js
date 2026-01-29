@@ -1,37 +1,33 @@
-// server.js — EMARI Discord Relay
+// server.js — EMARI Discord Relay (Enhanced Match)
 
 import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 
-// Load environment variables from .env file (for local dev)
 dotenv.config();
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Load Discord webhook from environment
 const webhook = process.env.DISCORD_WEBHOOK_URL;
 if (!webhook) {
-  console.error("❌ DISCORD_WEBHOOK_URL is not set");
+  console.error("❌ DISCORD_WEBHOOK_URL is not set in environment");
   process.exit(1);
 }
 
-// Cooldown settings
 const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 const seen = new Map(); // uuid → { reason, lastTime }
 
 // Root route
 app.get("/", (req, res) => {
-  res.send("✅ EMARI Relay is running");
+  res.send("✅ EMARI Relay is active");
 });
 
 // Relay endpoint
 app.post("/relay", async (req, res) => {
   const { avatar, uuid, reason, time } = req.body;
 
-  // Validate input
   if (!avatar || !uuid || !reason || !time) {
     return res.status(400).json({
       error: "Missing required fields: avatar, uuid, reason, or time"
@@ -41,7 +37,6 @@ app.post("/relay", async (req, res) => {
   const now = Date.now();
   const previous = seen.get(uuid);
 
-  // Suppress duplicates
   if (previous && previous.reason === reason && now - previous.lastTime < COOLDOWN_MS) {
     console.log(`⏩ Skipped duplicate alert for ${avatar} (${uuid})`);
     return res.send("Duplicate alert skipped");
@@ -49,7 +44,6 @@ app.post("/relay", async (req, res) => {
 
   seen.set(uuid, { reason, lastTime: now });
 
-  // Format Discord message
   const content = [
     "```",
     "🚨 EMARI Alert 🚨",
