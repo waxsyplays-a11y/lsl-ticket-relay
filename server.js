@@ -1,4 +1,4 @@
-// server.js — EMARI Discord Relay (Rate-Limited & Safe)
+// server.js — EMARI Discord Relay (Rate-Limit Safe)
 
 import express from "express";
 import fetch from "node-fetch";
@@ -9,55 +9,68 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
+/* ================= CONFIG ================= */
+
 const WEBHOOK = process.env.DISCORD_WEBHOOK_URL;
 if (!WEBHOOK) {
   console.error("❌ DISCORD_WEBHOOK_URL missing");
   process.exit(1);
 }
 
-// ---- Discord rate safety ----
-const QUEUE = [];
-let sending = false;
-const SEND_INTERVAL = 5000; // ms (safe for Discord)
+// Discord safe limits
+const SEND_INTERVAL_MS = 5000; // 🔒 1 message every 5 seconds
+const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
-// ---- Helper ----
+/* ================= STATE ================= */
+
+let queue = [];
+let sending = false;
+const seen = new Map();
+
+/* ================= UTILS ================= */
+
 function sanitize(text) {
   return String(text)
     .replace(/[`*_~]/g, "")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/</g, "")
+    .replace(/>/g, "");
 }
 
-// ---- Queue sender ----
-async function processQueue() {
-  if (sending || QUEUE.length === 0) return;
+/* ================= QUEUE SENDER ================= */
+
+async function sendNext() {
+  if (sending || queue.length === 0) return;
 
   sending = true;
-  const msg = QUEUE.shift();
+  const payload = queue.shift();
 
   try {
     const res = await fetch(WEBHOOK, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: msg })
+      body: JSON.stringify({ content: payload })
     });
 
     if (!res.ok) {
-      console.error(`❌ Discord error ${res.status}`);
+      const text = await res.text();
+      console.error(`❌ Discord error ${res.status}: ${text}`);
+    } else {
+      console.log("✅ Sent to Discord");
     }
-  } catch (e) {
-    console.error("🔥 Send failed:", e.message);
+  } catch (err) {
+    console.error("🔥 Discord send failed:", err.message);
   }
 
   setTimeout(() => {
     sending = false;
-    processQueue();
-  }, SEND_INTERVAL);
+    sendNext();
+  }, SEND_INTERVAL_MS);
 }
 
-// ---- Routes ----
-app.get("/", (req, res) => {
-  res.send("✅ EMARI Discord Relay Online");
+/* ================= ROUTES ================= */
+
+app.get("/", (_, res) => {
+  res.send("✅ EMARI Relay Online");
 });
 
 app.post("/relay", (req, res) => {
@@ -67,22 +80,31 @@ app.post("/relay", (req, res) => {
     return res.status(400).send("Invalid payload");
   }
 
-  const message = [
-    "📡 **EMARI Log**",
-    `👤 ${sanitize(avatar)}`,
-    `🆔 ${sanitize(uuid)}`,
-    `📝 ${sanitize(reason)}`,
-    `🕒 ${sanitize(time)}`
-  ].join("\n");
+  const now = Date.now();
+  const last = seen.get(uuid);
 
-  QUEUE.push(message);
-  processQueue();
+  if (last && last.reason === reason && now - last.time < DEDUPE_WINDOW_MS) {
+    return res.send("Duplicate ignored");
+  }
+
+  seen.set(uuid, { reason, time: now });
+
+  const message =
+    "🚨 **EMARI Alert** 🚨\n\n" +
+    "**Avatar:** " + sanitize(avatar) + "\n" +
+    "**UUID:** " + sanitize(uuid) + "\n" +
+    "**Reason:**\n" + sanitize(reason) + "\n\n" +
+    "**Time:** " + sanitize(time);
+
+  queue.push(message);
+  sendNext();
 
   res.send("Queued");
 });
 
-// ---- Start ----
+/* ================= START ================= */
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Relay listening on ${PORT}`);
+  console.log("🚀 EMARI Relay listening on port " + PORT);
 });
