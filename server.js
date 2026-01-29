@@ -1,111 +1,104 @@
-// server.js — EMARI Discord Relay (Hardened)
+// server.js — EMARI Discord Relay (Stable + Render-safe)
 
 import express from "express";
-import fetch from "node-fetch";
 import dotenv from "dotenv";
+
+// Render-safe fetch import
+const fetch = (...args) =>
+  import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// Optional: IP whitelist (add IPs to allow only trusted sources)
-// const ALLOWED_IPS = ["123.45.67.89", "98.76.54.32"];
+// ===== CONFIG =====
+const WEBHOOK = process.env.DISCORD_WEBHOOK_URL;
+const PORT = process.env.PORT || 3000;
+const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_DISCORD_LEN = 1900;
 
-const webhook = process.env.DISCORD_WEBHOOK_URL;
-if (!webhook) {
-  console.error("❌ DISCORD_WEBHOOK_URL is not set");
+// ===== SAFETY CHECK =====
+if (!WEBHOOK) {
+  console.error("❌ DISCORD_WEBHOOK_URL missing in environment");
   process.exit(1);
 }
 
-const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
-const seen = new Map(); // uuid → { reason, lastTime }
+// Cooldown cache (uuid → timestamp)
+const seen = new Map();
 
-// Root route
+// ===== HELPERS =====
+function sanitize(text) {
+  return String(text || "")
+    .replace(/[`*_~]/g, "")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function buildMessage({ avatar, uuid, reason, time }) {
+  return [
+    "🚨 **EMARI Security Alert** 🚨",
+    `**Avatar:** ${sanitize(avatar)}`,
+    `**UUID:** ${sanitize(uuid)}`,
+    `**Reason:**\n${sanitize(reason).slice(0, 1200)}`,
+    `**Time:** ${sanitize(time)}`
+  ].join("\n\n").slice(0, MAX_DISCORD_LEN);
+}
+
+// ===== ROUTES =====
 app.get("/", (req, res) => {
-  res.send("✅ EMARI Relay is online and secure");
+  res.send("✅ EMARI Discord Relay is online");
 });
 
-// Relay endpoint
 app.post("/relay", async (req, res) => {
   try {
-    // Optional: IP filtering
-    // const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-    // if (!ALLOWED_IPS.includes(ip)) {
-    //   console.warn(`⛔ Blocked request from unauthorized IP: ${ip}`);
-    //   return res.status(403).send("Forbidden");
-    // }
-
     const { avatar, uuid, reason, time } = req.body;
 
     // Validate payload
-    if (
-      typeof avatar !== "string" ||
-      typeof uuid !== "string" ||
-      typeof reason !== "string" ||
-      typeof time !== "string"
-    ) {
-      console.warn("⚠️ Invalid payload received:", req.body);
+    if (!avatar || !uuid || !reason || !time) {
       return res.status(400).json({
-        error: "Missing or invalid fields: avatar, uuid, reason, or time"
+        error: "Missing required fields"
       });
     }
 
+    // Cooldown check
     const now = Date.now();
-    const previous = seen.get(uuid);
-
-    if (previous && previous.reason === reason && now - previous.lastTime < COOLDOWN_MS) {
-      console.log(`⏩ Duplicate alert skipped for ${avatar} (${uuid})`);
-      return res.send("Duplicate alert skipped");
+    const last = seen.get(uuid);
+    if (last && now - last < COOLDOWN_MS) {
+      return res.send("⏩ Duplicate alert skipped");
     }
+    seen.set(uuid, now);
 
-    seen.set(uuid, { reason, lastTime: now });
+    // Build Discord message
+    const content = buildMessage({ avatar, uuid, reason, time });
 
-    // Format message safely
-    const content = [
-      "🚨 **EMARI Alert** 🚨",
-      `**Avatar:** ${sanitize(avatar)} (${sanitize(uuid)})`,
-      `**Reason:**\n${sanitize(reason)}`,
-      `**Time:** ${sanitize(time)}`
-    ].join("\n\n");
-
-    const response = await fetch(webhook, {
+    // Send to Discord
+    const response = await fetch(WEBHOOK, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content })
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ Discord webhook error: HTTP ${response.status} → ${errorText}`);
-      return res.status(500).send("Failed to send to Discord");
+    // Discord success = 204 or 200
+    if (response.status === 204 || response.status === 200) {
+      console.log(`✅ Relayed alert for ${avatar}`);
+      return res.send("Alert relayed");
     }
 
-    console.log(`✅ Alert relayed for ${avatar} (${uuid})`);
-    res.send("Alert relayed successfully");
+    // Discord error
+    const errText = await response.text();
+    console.error(
+      `❌ Discord webhook error: ${response.status} → ${errText}`
+    );
+    return res.status(500).send("Discord rejected message");
+
   } catch (err) {
-    console.error("🔥 Unexpected error:", err);
-    res.status(500).send("Internal server error");
+    console.error("🔥 Relay crash:", err);
+    return res.status(500).send("Relay failure");
   }
 });
 
-// Global error handler
-app.use((err, req, res, next) => {
-  console.error("🔥 Uncaught error:", err);
-  res.status(500).send("Unexpected server error");
-});
-
-// Sanitize input to prevent Discord formatting issues
-function sanitize(text) {
-  return String(text)
-    .replace(/[`*_~]/g, "") // remove markdown control characters
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-// Start server
-const PORT = process.env.PORT || 3000;
+// ===== START =====
 app.listen(PORT, () => {
   console.log(`🚀 EMARI Relay listening on port ${PORT}`);
 });
