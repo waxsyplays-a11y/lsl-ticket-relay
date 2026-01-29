@@ -18,7 +18,7 @@ if (!WEBHOOK) {
 // ---- Discord rate safety ----
 const QUEUE = [];
 let sending = false;
-const SEND_INTERVAL = 1500; // ms (safe for Discord)
+const SEND_INTERVAL = 5000; // ms (safe for Discord)
 
 // ---- Helper ----
 function sanitize(text) {
