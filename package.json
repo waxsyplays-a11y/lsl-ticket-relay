@@ -1,15 +1,29 @@
 {
   "name": "emari-discord-relay",
-  "version": "1.0.0",
-  "description": "Relay for EMARI Ticket + Script Scanner (LSL → Discord)",
+  "version": "1.1.0",
+  "description": "Relay server for EMARI Ticket + Script Scanner (LSL → Discord)",
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
+  "keywords": [
+    "lsl",
+    "discord",
+    "webhook",
+    "relay",
+    "emari",
+    "secondlife"
+  ],
+  "author": "EMARI Systems",
+  "license": "MIT",
   "dependencies": {
+    "dotenv": "^16.3.1",
     "express": "^4.19.2",
-    "node-fetch": "^3.3.2",
-    "dotenv": "^16.3.1"
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
   }
 }
