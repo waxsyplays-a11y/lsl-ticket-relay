@@ -1,4 +1,4 @@
-// server.js — EMARI Discord Relay (SAFE VERSION)
+// server.js — EMARI Discord Relay (ANTI-RATE-LIMIT)
 
 const express = require("express");
 const fetch = require("node-fetch");
@@ -13,7 +13,8 @@ if (!WEBHOOK) {
   process.exit(1);
 }
 
-const SEND_INTERVAL_MS = 5000;
+// Discord-safe limits
+const SEND_DELAY_MS = 3000; // 1 message every 3 seconds
 const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
 let queue = [];
@@ -27,30 +28,41 @@ function sanitize(text) {
     .replace(/>/g, "");
 }
 
-async function sendNext() {
+async function processQueue() {
   if (sending || queue.length === 0) return;
 
   sending = true;
-  const payload = queue.shift();
+  const content = queue.shift();
 
   try {
     const res = await fetch(WEBHOOK, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: payload })
+      body: JSON.stringify({ content })
     });
 
     if (!res.ok) {
-      console.error("❌ Discord rejected:", res.status);
+      const retry = res.headers.get("retry-after");
+      console.error(`❌ Discord rejected: ${res.status}`);
+
+      // If Discord asks to wait, obey
+      if (retry) {
+        queue.unshift(content);
+        setTimeout(() => {
+          sending = false;
+          processQueue();
+        }, Number(retry) * 1000);
+        return;
+      }
     }
   } catch (err) {
-    console.error("🔥 Send failed:", err.message);
+    console.error("🔥 Send error:", err.message);
   }
 
   setTimeout(() => {
     sending = false;
-    sendNext();
-  }, SEND_INTERVAL_MS);
+    processQueue();
+  }, SEND_DELAY_MS);
 }
 
 app.get("/", (req, res) => {
@@ -68,20 +80,20 @@ app.post("/relay", (req, res) => {
   const last = seen.get(uuid);
 
   if (last && last.reason === reason && now - last.time < DEDUPE_WINDOW_MS) {
-    return res.send("Duplicate ignored");
+    return res.send("Duplicate skipped");
   }
 
   seen.set(uuid, { reason, time: now });
 
   const message =
-    "🚨 **EMARI Alert** 🚨\n\n" +
+    "🎟️ **EMARI Gate Log**\n\n" +
     "**Avatar:** " + sanitize(avatar) + "\n" +
-    "**UUID:** " + sanitize(uuid) + "\n" +
-    "**Reason:**\n" + sanitize(reason) + "\n\n" +
+    "**UUID:** " + sanitize(uuid) + "\n\n" +
+    "**Status:**\n" + sanitize(reason) + "\n\n" +
     "**Time:** " + sanitize(time);
 
   queue.push(message);
-  sendNext();
+  processQueue();
 
   res.send("Queued");
 });
