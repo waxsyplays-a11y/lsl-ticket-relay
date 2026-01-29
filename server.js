@@ -1,15 +1,11 @@
-// server.js — EMARI Discord Relay (Rate-Limit Safe)
+// server.js — EMARI Discord Relay (SAFE VERSION)
 
-import express from "express";
-import fetch from "node-fetch";
-import dotenv from "dotenv";
-
-dotenv.config();
+const express = require("express");
+const fetch = require("node-fetch");
+require("dotenv").config();
 
 const app = express();
 app.use(express.json());
-
-/* ================= CONFIG ================= */
 
 const WEBHOOK = process.env.DISCORD_WEBHOOK_URL;
 if (!WEBHOOK) {
@@ -17,17 +13,12 @@ if (!WEBHOOK) {
   process.exit(1);
 }
 
-// Discord safe limits
-const SEND_INTERVAL_MS = 5000; // 🔒 1 message every 5 seconds
+const SEND_INTERVAL_MS = 5000;
 const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
-
-/* ================= STATE ================= */
 
 let queue = [];
 let sending = false;
 const seen = new Map();
-
-/* ================= UTILS ================= */
 
 function sanitize(text) {
   return String(text)
@@ -35,8 +26,6 @@ function sanitize(text) {
     .replace(/</g, "")
     .replace(/>/g, "");
 }
-
-/* ================= QUEUE SENDER ================= */
 
 async function sendNext() {
   if (sending || queue.length === 0) return;
@@ -52,13 +41,10 @@ async function sendNext() {
     });
 
     if (!res.ok) {
-      const text = await res.text();
-      console.error(`❌ Discord error ${res.status}: ${text}`);
-    } else {
-      console.log("✅ Sent to Discord");
+      console.error("❌ Discord rejected:", res.status);
     }
   } catch (err) {
-    console.error("🔥 Discord send failed:", err.message);
+    console.error("🔥 Send failed:", err.message);
   }
 
   setTimeout(() => {
@@ -67,9 +53,7 @@ async function sendNext() {
   }, SEND_INTERVAL_MS);
 }
 
-/* ================= ROUTES ================= */
-
-app.get("/", (_, res) => {
+app.get("/", (req, res) => {
   res.send("✅ EMARI Relay Online");
 });
 
@@ -102,9 +86,7 @@ app.post("/relay", (req, res) => {
   res.send("Queued");
 });
 
-/* ================= START ================= */
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log("🚀 EMARI Relay listening on port " + PORT);
+  console.log("🚀 EMARI Relay running on port", PORT);
 });
