@@ -1,5 +1,4 @@
-// server.js — EMARI Relay with Dynamic Webhook Support
-
+// EMARI Discord Relay — Ultimate Version
 const express = require("express");
 const fetch = require("node-fetch");
 require("dotenv").config();
