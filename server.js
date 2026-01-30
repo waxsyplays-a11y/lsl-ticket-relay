@@ -1,4 +1,4 @@
-// server.js — EMARI Discord Relay (Queue + Rate Limit Safe)
+// server.js — EMARI Relay with Dynamic Webhook Support
 
 const express = require("express");
 const fetch = require("node-fetch");
@@ -9,9 +9,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 10000;
-const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+const DEFAULT_WEBHOOK = process.env.DISCORD_WEBHOOK_URL;
 
-if (!WEBHOOK_URL) {
+if (!DEFAULT_WEBHOOK) {
   console.error("❌ Missing DISCORD_WEBHOOK_URL in .env");
   process.exit(1);
 }
@@ -37,8 +37,14 @@ function formatMessage({ avatar, uuid, reason, time }) {
   );
 }
 
-function enqueue(content) {
-  queue.push(content);
+function isValidWebhook(url) {
+  return typeof url === "string" &&
+    url.startsWith("https://discord.com/api/webhooks/") &&
+    url.length < 300;
+}
+
+function enqueueToWebhook(content, webhook) {
+  queue.push({ content, webhook });
   processQueue();
 }
 
@@ -46,10 +52,10 @@ async function processQueue() {
   if (sending || queue.length === 0) return;
   sending = true;
 
-  const content = queue.shift();
+  const { content, webhook } = queue.shift();
 
   try {
-    const res = await fetch(WEBHOOK_URL, {
+    const res = await fetch(webhook, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content })
@@ -63,7 +69,7 @@ async function processQueue() {
         const retryAfter = res.headers.get("retry-after");
         const delay = retryAfter ? parseFloat(retryAfter) * 1000 : 5000;
         console.warn(`⏳ Rate limited. Retrying in ${delay}ms`);
-        queue.unshift(content);
+        queue.unshift({ content, webhook });
         setTimeout(() => {
           sending = false;
           processQueue();
@@ -89,7 +95,7 @@ app.get("/", (req, res) => {
 });
 
 app.post("/relay", (req, res) => {
-  const { avatar, uuid, reason, time } = req.body;
+  const { avatar, uuid, reason, time, webhook } = req.body;
 
   if (!avatar || !uuid || !reason || !time) {
     return res.status(400).json({ error: "Missing required fields" });
@@ -112,7 +118,8 @@ app.post("/relay", (req, res) => {
     return res.status(400).send("Invalid message content");
   }
 
-  enqueue(content);
+  const targetWebhook = isValidWebhook(webhook) ? webhook : DEFAULT_WEBHOOK;
+  enqueueToWebhook(content, targetWebhook);
   res.send("Queued");
 });
 
