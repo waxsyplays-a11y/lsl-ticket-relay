@@ -1,4 +1,4 @@
-// EMARI Discord Relay — Ultimate Version
+// EMARI Discord Relay — Full Script with Cloudflare Detection and Retry
 const express = require("express");
 const fetch = require("node-fetch");
 require("dotenv").config();
@@ -60,14 +60,17 @@ async function processQueue() {
       body: JSON.stringify({ content })
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      console.error(`❌ Discord error: ${res.status} → ${text}`);
+    const text = await res.text();
 
-      if (res.status === 429) {
-        const retryAfter = res.headers.get("retry-after");
-        const delay = retryAfter ? parseFloat(retryAfter) * 1000 : 5000;
-        console.warn(`⏳ Rate limited. Retrying in ${delay}ms`);
+    if (!res.ok) {
+      const isCloudflareBlock =
+        res.status === 429 &&
+        text.includes("cloudflare") &&
+        (text.includes("Error 1015") || text.includes("You are being rate limited"));
+
+      if (isCloudflareBlock) {
+        const delay = 10000; // 10 seconds fallback
+        console.warn("🛡️ Cloudflare block detected. Retrying in 10s...");
         queue.unshift({ content, webhook });
         setTimeout(() => {
           sending = false;
@@ -75,6 +78,20 @@ async function processQueue() {
         }, delay);
         return;
       }
+
+      if (res.status === 429) {
+        const retryAfter = res.headers.get("retry-after");
+        const delay = retryAfter ? parseFloat(retryAfter) * 1000 : 5000;
+        console.warn(`⏳ Discord rate limit. Retrying in ${delay}ms`);
+        queue.unshift({ content, webhook });
+        setTimeout(() => {
+          sending = false;
+          processQueue();
+        }, delay);
+        return;
+      }
+
+      console.error(`❌ Discord error: ${res.status} → ${text}`);
     } else {
       console.log("✅ Message sent");
     }
