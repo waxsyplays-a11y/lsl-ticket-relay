@@ -1,10 +1,15 @@
 {
-  "name": "emari-relay",
+  "name": "emari-discord-relay",
   "version": "1.0.0",
+  "description": "EMARI Relay Server for Discord Alerts",
   "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
+    "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "node-fetch": "^2.6.9",
-    "dotenv": "^16.4.5"
+    "node-fetch": "^2.6.12"
   }
 }
