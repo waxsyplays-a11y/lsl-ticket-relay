@@ -1,12 +1,8 @@
-// ================================
-// EMARI Discord Relay (Refined)
-// ================================
+// server.js — EMARI Discord Relay (Stable + Safe)
 
-import express from "express";
-import fetch from "node-fetch";
-import dotenv from "dotenv";
-
-dotenv.config();
+const express = require("express");
+const fetch = require("node-fetch");
+require("dotenv").config();
 
 const app = express();
 app.use(express.json());
@@ -21,7 +17,7 @@ if (!WEBHOOK_URL) {
 }
 
 // Duplicate suppression memory
-const seen = new Map(); // uuid -> { reason, lastTime }
+const seen = new Map(); // uuid → { reason, lastTime }
 const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 // Format message for Discord
@@ -37,7 +33,6 @@ function formatMessage({ avatar, uuid, reason, time }) {
   );
 }
 
-// Routes
 app.get("/", (req, res) => {
   res.send("✅ EMARI Relay is running");
 });
@@ -45,13 +40,20 @@ app.get("/", (req, res) => {
 app.post("/relay", async (req, res) => {
   const { avatar, uuid, reason, time } = req.body;
 
-  if (!avatar || !uuid || !reason || !time) {
-    return res.status(400).json({ error: "Missing required fields" });
+  // Validate input
+  if (
+    typeof avatar !== "string" ||
+    typeof uuid !== "string" ||
+    typeof reason !== "string" ||
+    typeof time !== "string"
+  ) {
+    return res.status(400).json({ error: "Missing or invalid fields" });
   }
 
   const now = Date.now();
   const previous = seen.get(uuid);
 
+  // Duplicate suppression
   if (previous && previous.reason === reason && now - previous.lastTime < COOLDOWN_MS) {
     console.log(`⏩ Skipped duplicate for ${avatar} (${uuid})`);
     return res.send("Duplicate skipped");
@@ -60,6 +62,12 @@ app.post("/relay", async (req, res) => {
   seen.set(uuid, { reason, lastTime: now });
 
   const content = formatMessage({ avatar, uuid, reason, time });
+
+  // Final safety check
+  if (!content || content.length > 2000) {
+    console.error("❌ Invalid message content");
+    return res.status(400).send("Invalid message content");
+  }
 
   try {
     const response = await fetch(WEBHOOK_URL, {
@@ -82,7 +90,6 @@ app.post("/relay", async (req, res) => {
   }
 });
 
-// Start server
 app.listen(PORT, () => {
   console.log(`🚀 EMARI Relay listening on port ${PORT}`);
 });
