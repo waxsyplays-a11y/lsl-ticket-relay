@@ -1,3 +1,8 @@
+// ================================
+// EMARI Discord Relay (CommonJS)
+// Render-safe, Discord-safe
+// ================================
+
 const express = require("express");
 const fetch = require("node-fetch");
 require("dotenv").config();
@@ -5,114 +10,113 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-const WEBHOOKS = {
-  default: process.env.DISCORD_WEBHOOK_URL,
-  security: process.env.DISCORD_WEBHOOK_SECURITY,
-  support: process.env.DISCORD_WEBHOOK_SUPPORT
-};
+const PORT = process.env.PORT || 3000;
+const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
-const SEND_DELAY_MS = 10000;
-const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
-const MAX_QUEUE_SIZE = 50;
-
-let queue = [];
-let sending = false;
-const seen = new Map();
-
-function sanitize(text) {
-  return String(text).replace(/[`*_~]/g, "").replace(/[<>]/g, "");
+if (!WEBHOOK_URL) {
+  console.error("❌ DISCORD_WEBHOOK_URL missing");
+  process.exit(1);
 }
 
-function log(msg) {
-  console.log(`[${new Date().toISOString()}] ${msg}`);
-}
+// --------------------
+// Webhook validation
+// --------------------
+let webhookValid = false;
+let lastValidation = 0;
+const VALIDATE_EVERY = 10 * 60 * 1000; // 10 minutes
 
-async function processQueue() {
-  if (sending || queue.length === 0) return;
-  sending = true;
-
-  const { embed, webhook } = queue.shift();
+async function validateWebhook() {
+  const now = Date.now();
+  if (webhookValid && now - lastValidation < VALIDATE_EVERY) {
+    return true;
+  }
 
   try {
-    const res = await fetch(webhook, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ embeds: [embed] })
-    });
-
+    const res = await fetch(WEBHOOK_URL, { method: "GET" });
     if (!res.ok) {
-      const retryAfter = res.headers.get("retry-after");
-      log(`❌ Discord rejected: ${res.status}`);
-      if (retryAfter) {
-        log(`⏳ Rate limited. Retrying in ${retryAfter}s`);
-        queue.unshift({ embed, webhook });
-        setTimeout(() => {
-          sending = false;
-          processQueue();
-        }, Number(retryAfter) * 1000);
-        return;
-      }
-    } else {
-      log("✅ Alert sent");
+      console.error("❌ Webhook invalid:", res.status);
+      webhookValid = false;
+      return false;
     }
-  } catch (err) {
-    log("🔥 Send error: " + err.message);
-  }
 
-  setTimeout(() => {
-    sending = false;
-    processQueue();
-  }, SEND_DELAY_MS);
+    webhookValid = true;
+    lastValidation = now;
+    console.log("✅ Discord webhook validated");
+    return true;
+  } catch (err) {
+    console.error("❌ Webhook validation failed:", err.message);
+    webhookValid = false;
+    return false;
+  }
 }
 
-app.get("/", (req, res) => {
-  res.send("✅ EMARI Relay Online (Embed Logging)");
-});
+// --------------------
+// Rate-limit protection
+// --------------------
+let blockedUntil = 0;
 
-app.post("/relay", (req, res) => {
-  const { avatar, uuid, reason, time, channel = "default" } = req.body;
-
-  if (!avatar || !uuid || !reason || !time) {
-    return res.status(400).send("Invalid payload");
-  }
-
-  const webhook = WEBHOOKS[channel];
-  if (!webhook) return res.status(400).send("Unknown channel");
-
+async function postToDiscord(content) {
   const now = Date.now();
-  const last = seen.get(uuid);
-  if (last && last.reason === reason && now - last.time < DEDUPE_WINDOW_MS) {
-    return res.send("Duplicate skipped");
+  if (now < blockedUntil) {
+    throw new Error("Rate limited (cooldown active)");
   }
 
-  seen.set(uuid, { reason, time: now });
+  const res = await fetch(WEBHOOK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content })
+  });
 
-  if (queue.length >= MAX_QUEUE_SIZE) {
-    log("⚠️ Queue full. Dropping message.");
-    return res.status(429).send("Queue full");
+  if (res.status === 429) {
+    const retry = res.headers.get("retry-after");
+    const delay = retry ? parseInt(retry, 10) * 1000 : 5000;
+    blockedUntil = Date.now() + delay;
+    throw new Error("Discord rate limited (429)");
   }
 
-  const embed = {
-    title: "🚨 EMARI Gate Alert",
-    color: 0xff0000,
-    fields: [
-      { name: "Avatar", value: sanitize(avatar), inline: true },
-      { name: "UUID", value: sanitize(uuid), inline: true },
-      { name: "Status", value: sanitize(reason) },
-      { name: "Time", value: sanitize(time) }
-    ],
-    footer: { text: "EMARI Relay System" },
-    timestamp: new Date().toISOString()
-  };
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Discord rejected: ${res.status} ${text}`);
+  }
+}
 
-  queue.push({ embed, webhook });
-  processQueue();
-
-  res.send("Queued");
+// --------------------
+// Routes
+// --------------------
+app.get("/", (req, res) => {
+  res.send("✅ EMARI Discord Relay Online");
 });
 
-const PORT = process.env.PORT || 3000;
+app.post("/relay", async (req, res) => {
+  try {
+    const { avatar, uuid, reason, time } = req.body;
+
+    if (!avatar || !uuid || !reason || !time) {
+      return res.status(400).json({ error: "Invalid payload" });
+    }
+
+    const ok = await validateWebhook();
+    if (!ok) {
+      return res.status(500).json({ error: "Webhook invalid" });
+    }
+
+    const message =
+      "🚨 **EMARI Alert** 🚨\n\n" +
+      `**Avatar:** ${avatar}\n` +
+      `**UUID:** ${uuid}\n\n` +
+      `**Reason:**\n${reason}\n\n` +
+      `**Time:** ${time}`;
+
+    await postToDiscord(message);
+
+    res.send("OK");
+  } catch (err) {
+    console.error("❌ Relay error:", err.message);
+    res.status(500).send(err.message);
+  }
+});
+
+// --------------------
 app.listen(PORT, () => {
-  log(`🚀 EMARI Relay running on port ${PORT}`);
+  console.log(`🚀 EMARI Relay running on port ${PORT}`);
 });
-
