@@ -1,5 +1,3 @@
-// server.js — EMARI Discord Relay (Embed Logging, Overload-Proof)
-
 const express = require("express");
 const fetch = require("node-fetch");
 require("dotenv").config();
@@ -7,7 +5,6 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-// Webhook map by channel name
 const WEBHOOKS = {
   default: process.env.DISCORD_WEBHOOK_URL,
   security: process.env.DISCORD_WEBHOOK_SECURITY,
@@ -23,10 +20,7 @@ let sending = false;
 const seen = new Map();
 
 function sanitize(text) {
-  return String(text)
-    .replace(/[`*_~]/g, "")
-    .replace(/</g, "")
-    .replace(/>/g, "");
+  return String(text).replace(/[`*_~]/g, "").replace(/[<>]/g, "");
 }
 
 function log(msg) {
@@ -35,8 +29,8 @@ function log(msg) {
 
 async function processQueue() {
   if (sending || queue.length === 0) return;
-
   sending = true;
+
   const { embed, webhook } = queue.shift();
 
   try {
@@ -49,7 +43,6 @@ async function processQueue() {
     if (!res.ok) {
       const retryAfter = res.headers.get("retry-after");
       log(`❌ Discord rejected: ${res.status}`);
-
       if (retryAfter) {
         log(`⏳ Rate limited. Retrying in ${retryAfter}s`);
         queue.unshift({ embed, webhook });
