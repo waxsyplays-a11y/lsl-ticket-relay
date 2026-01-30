@@ -1,4 +1,4 @@
-// server.js — EMARI Discord Relay (Stable + Safe)
+// server.js — EMARI Discord Relay (Queue + Rate Limit Safe)
 
 const express = require("express");
 const fetch = require("node-fetch");
@@ -16,11 +16,15 @@ if (!WEBHOOK_URL) {
   process.exit(1);
 }
 
-// Duplicate suppression memory
+// Duplicate suppression
 const seen = new Map(); // uuid → { reason, lastTime }
 const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
-// Format message for Discord
+// Message queue
+const queue = [];
+let sending = false;
+const SEND_DELAY_MS = 1100; // 1.1s between messages
+
 function formatMessage({ avatar, uuid, reason, time }) {
   return (
     "```" +
@@ -33,27 +37,67 @@ function formatMessage({ avatar, uuid, reason, time }) {
   );
 }
 
+function enqueue(content) {
+  queue.push(content);
+  processQueue();
+}
+
+async function processQueue() {
+  if (sending || queue.length === 0) return;
+  sending = true;
+
+  const content = queue.shift();
+
+  try {
+    const res = await fetch(WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content })
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(`❌ Discord error: ${res.status} → ${text}`);
+
+      if (res.status === 429) {
+        const retryAfter = res.headers.get("retry-after");
+        const delay = retryAfter ? parseFloat(retryAfter) * 1000 : 5000;
+        console.warn(`⏳ Rate limited. Retrying in ${delay}ms`);
+        queue.unshift(content);
+        setTimeout(() => {
+          sending = false;
+          processQueue();
+        }, delay);
+        return;
+      }
+    } else {
+      console.log("✅ Message sent");
+    }
+  } catch (err) {
+    console.error("🔥 Send error:", err.message);
+  }
+
+  setTimeout(() => {
+    sending = false;
+    processQueue();
+  }, SEND_DELAY_MS);
+}
+
+// Routes
 app.get("/", (req, res) => {
   res.send("✅ EMARI Relay is running");
 });
 
-app.post("/relay", async (req, res) => {
+app.post("/relay", (req, res) => {
   const { avatar, uuid, reason, time } = req.body;
 
-  // Validate input
-  if (
-    typeof avatar !== "string" ||
-    typeof uuid !== "string" ||
-    typeof reason !== "string" ||
-    typeof time !== "string"
-  ) {
-    return res.status(400).json({ error: "Missing or invalid fields" });
+  if (!avatar || !uuid || !reason || !time) {
+    return res.status(400).json({ error: "Missing required fields" });
   }
 
   const now = Date.now();
   const previous = seen.get(uuid);
 
-  // Duplicate suppression
   if (previous && previous.reason === reason && now - previous.lastTime < COOLDOWN_MS) {
     console.log(`⏩ Skipped duplicate for ${avatar} (${uuid})`);
     return res.send("Duplicate skipped");
@@ -63,31 +107,13 @@ app.post("/relay", async (req, res) => {
 
   const content = formatMessage({ avatar, uuid, reason, time });
 
-  // Final safety check
   if (!content || content.length > 2000) {
     console.error("❌ Invalid message content");
     return res.status(400).send("Invalid message content");
   }
 
-  try {
-    const response = await fetch(WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`❌ Discord error: ${response.status} → ${errorText}`);
-      return res.status(500).send("Discord relay failed");
-    }
-
-    console.log(`✅ Alert sent for ${avatar} (${uuid})`);
-    res.send("OK");
-  } catch (err) {
-    console.error("🔥 Relay error:", err.message);
-    res.status(500).send("Relay server error");
-  }
+  enqueue(content);
+  res.send("Queued");
 });
 
 app.listen(PORT, () => {
