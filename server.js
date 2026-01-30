@@ -14,7 +14,7 @@ if (!WEBHOOK) {
 }
 
 // Discord-safe limits
-const SEND_DELAY_MS = 3000; // 1 message every 3 seconds
+const SEND_DELAY_MS = 60000; // 1 message every 3 seconds
 const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
 let queue = [];
