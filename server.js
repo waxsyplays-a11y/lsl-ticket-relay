@@ -1,4 +1,4 @@
-// server.js — EMARI Discord Relay (Overload-Proof)
+// server.js — EMARI Discord Relay (Overload-Proof, Multi-Channel)
 
 const express = require("express");
 const fetch = require("node-fetch");
