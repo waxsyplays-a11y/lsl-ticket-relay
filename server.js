@@ -1,4 +1,4 @@
-// server.js — EMARI Discord Relay (ANTI-RATE-LIMIT)
+// server.js — EMARI Discord Relay (ANTI-RATE-LIMIT v2)
 
 const express = require("express");
 const fetch = require("node-fetch");
@@ -13,13 +13,16 @@ if (!WEBHOOK) {
   process.exit(1);
 }
 
-// Discord-safe limits
-const SEND_DELAY_MS = 60000; // 1 message every 3 seconds
+// Rate limit and deduplication settings
+const SEND_DELAY_MS = 3000; // 1 message every 3 seconds
 const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
 let queue = [];
 let sending = false;
 const seen = new Map();
+
+// Optional: IP whitelist
+// const ALLOWED_IPS = ["123.45.67.89", "98.76.54.32"];
 
 function sanitize(text) {
   return String(text)
@@ -32,7 +35,7 @@ async function processQueue() {
   if (sending || queue.length === 0) return;
 
   sending = true;
-  const content = queue.shift();
+  const { content, retries } = queue.shift();
 
   try {
     const res = await fetch(WEBHOOK, {
@@ -42,21 +45,29 @@ async function processQueue() {
     });
 
     if (!res.ok) {
-      const retry = res.headers.get("retry-after");
+      const retryAfter = res.headers.get("retry-after");
       console.error(`❌ Discord rejected: ${res.status}`);
 
-      // If Discord asks to wait, obey
-      if (retry) {
-        queue.unshift(content);
+      if (retryAfter) {
+        console.warn(`⏳ Rate limited. Retrying in ${retryAfter}s`);
+        queue.unshift({ content, retries });
         setTimeout(() => {
           sending = false;
           processQueue();
-        }, Number(retry) * 1000);
+        }, Number(retryAfter) * 1000);
         return;
+      }
+
+      if (retries < 3) {
+        console.warn(`🔁 Retrying (${retries + 1})...`);
+        queue.unshift({ content, retries: retries + 1 });
       }
     }
   } catch (err) {
     console.error("🔥 Send error:", err.message);
+    if (retries < 3) {
+      queue.unshift({ content, retries: retries + 1 });
+    }
   }
 
   setTimeout(() => {
@@ -70,6 +81,13 @@ app.get("/", (req, res) => {
 });
 
 app.post("/relay", (req, res) => {
+  // Optional: IP filtering
+  // const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+  // if (!ALLOWED_IPS.includes(ip)) {
+  //   console.warn(`⛔ Blocked request from unauthorized IP: ${ip}`);
+  //   return res.status(403).send("Forbidden");
+  // }
+
   const { avatar, uuid, reason, time } = req.body;
 
   if (!avatar || !uuid || !reason || !time) {
@@ -92,7 +110,7 @@ app.post("/relay", (req, res) => {
     "**Status:**\n" + sanitize(reason) + "\n\n" +
     "**Time:** " + sanitize(time);
 
-  queue.push(message);
+  queue.push({ content: message, retries: 0 });
   processQueue();
 
   res.send("Queued");
