@@ -1,5 +1,5 @@
 // ================================
-// EMARI Discord Relay (Validated + Safe)
+// EMARI Discord Relay (Render Safe)
 // ================================
 
 import express from "express";
@@ -10,34 +10,32 @@ dotenv.config();
 
 const app = express();
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
 if (!WEBHOOK_URL) {
-  console.error("❌ DISCORD_WEBHOOK_URL is missing");
+  console.error("❌ DISCORD_WEBHOOK_URL missing");
   process.exit(1);
 }
 
-// -----------------------------
-// Webhook validation cache
-// -----------------------------
+// --------------------
+// Webhook validation
+// --------------------
 let webhookValid = false;
 let lastValidation = 0;
-const VALIDATION_TTL = 10 * 60 * 1000; // 10 minutes
+const VALIDATE_EVERY = 10 * 60 * 1000; // 10 min
 
-async function validateWebhook(force = false) {
+async function validateWebhook() {
   const now = Date.now();
-  if (!force && webhookValid && now - lastValidation < VALIDATION_TTL) {
+  if (webhookValid && now - lastValidation < VALIDATE_EVERY) {
     return true;
   }
 
   try {
     const res = await fetch(WEBHOOK_URL, { method: "GET" });
-
     if (!res.ok) {
-      console.error(`❌ Webhook validation failed: HTTP ${res.status}`);
+      console.error("❌ Webhook invalid:", res.status);
       webhookValid = false;
       return false;
     }
@@ -47,81 +45,70 @@ async function validateWebhook(force = false) {
     console.log("✅ Discord webhook validated");
     return true;
   } catch (err) {
-    console.error("❌ Webhook validation error:", err.message);
+    console.error("❌ Webhook check failed:", err.message);
     webhookValid = false;
     return false;
   }
 }
 
-// Validate once at startup
-await validateWebhook(true);
+// --------------------
+// Rate-limit protection
+// --------------------
+let blockedUntil = 0;
 
-// -----------------------------
-// Rate-limit handling
-// -----------------------------
-let rateLimitedUntil = 0;
-
-async function sendToDiscord(content) {
+async function postToDiscord(content) {
   const now = Date.now();
-
-  if (now < rateLimitedUntil) {
+  if (now < blockedUntil) {
     throw new Error("Rate limited (cooldown active)");
   }
 
-  const response = await fetch(WEBHOOK_URL, {
+  const res = await fetch(WEBHOOK_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content })
   });
 
-  if (response.status === 429) {
-    const retry = response.headers.get("retry-after");
-    const delay = retry ? parseInt(retry) * 1000 : 5000;
-    rateLimitedUntil = Date.now() + delay;
-    throw new Error("Discord rate limit (429)");
+  if (res.status === 429) {
+    const retry = res.headers.get("retry-after");
+    const delay = retry ? parseInt(retry, 10) * 1000 : 5000;
+    blockedUntil = Date.now() + delay;
+    throw new Error("Discord rate limited (429)");
   }
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Discord rejected (${response.status}): ${text}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Discord rejected: ${res.status} ${text}`);
   }
 }
 
-// -----------------------------
+// --------------------
 // Routes
-// -----------------------------
+// --------------------
 app.get("/", (req, res) => {
-  res.send("✅ EMARI Relay online");
+  res.send("✅ EMARI Discord Relay Online");
 });
 
 app.post("/relay", async (req, res) => {
   try {
     const { avatar, uuid, reason, time } = req.body;
 
-    if (
-      typeof avatar !== "string" ||
-      typeof uuid !== "string" ||
-      typeof reason !== "string" ||
-      typeof time !== "string"
-    ) {
+    if (!avatar || !uuid || !reason || !time) {
       return res.status(400).json({ error: "Invalid payload" });
     }
 
-    // Revalidate webhook if needed
-    const valid = await validateWebhook();
-    if (!valid) {
-      return res.status(500).json({ error: "Discord webhook invalid" });
+    const ok = await validateWebhook();
+    if (!ok) {
+      return res.status(500).json({ error: "Webhook invalid" });
     }
 
-    const message = [
-      "🚨 **EMARI Alert** 🚨",
-      `**Avatar:** ${avatar}`,
-      `**UUID:** ${uuid}`,
-      `**Reason:**\n${reason}`,
-      `**Time:** ${time}`
-    ].join("\n\n");
+    const message =
+      "🚨 **EMARI Alert** 🚨\n\n" +
+      `**Avatar:** ${avatar}\n` +
+      `**UUID:** ${uuid}\n\n` +
+      `**Reason:**\n${reason}\n\n` +
+      `**Time:** ${time}`;
 
-    await sendToDiscord(message);
+    await postToDiscord(message);
 
     res.send("OK");
   } catch (err) {
@@ -130,7 +117,7 @@ app.post("/relay", async (req, res) => {
   }
 });
 
-// -----------------------------
+// --------------------
 app.listen(PORT, () => {
   console.log(`🚀 EMARI Relay running on port ${PORT}`);
 });
