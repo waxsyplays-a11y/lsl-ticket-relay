@@ -1,4 +1,4 @@
-// server.js — EMARI Discord Relay (Overload-Proof, Multi-Channel)
+// server.js — EMARI Discord Relay (Embed Logging, Overload-Proof)
 
 const express = require("express");
 const fetch = require("node-fetch");
@@ -14,7 +14,7 @@ const WEBHOOKS = {
   support: process.env.DISCORD_WEBHOOK_SUPPORT
 };
 
-const SEND_DELAY_MS = 10000; // 1 message every 10 seconds
+const SEND_DELAY_MS = 10000;
 const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 const MAX_QUEUE_SIZE = 50;
 
@@ -37,13 +37,13 @@ async function processQueue() {
   if (sending || queue.length === 0) return;
 
   sending = true;
-  const { content, webhook } = queue.shift();
+  const { embed, webhook } = queue.shift();
 
   try {
     const res = await fetch(webhook, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content })
+      body: JSON.stringify({ embeds: [embed] })
     });
 
     if (!res.ok) {
@@ -52,7 +52,7 @@ async function processQueue() {
 
       if (retryAfter) {
         log(`⏳ Rate limited. Retrying in ${retryAfter}s`);
-        queue.unshift({ content, webhook });
+        queue.unshift({ embed, webhook });
         setTimeout(() => {
           sending = false;
           processQueue();
@@ -73,7 +73,7 @@ async function processQueue() {
 }
 
 app.get("/", (req, res) => {
-  res.send("✅ EMARI Relay Online (Overload-Proof)");
+  res.send("✅ EMARI Relay Online (Embed Logging)");
 });
 
 app.post("/relay", (req, res) => {
@@ -99,14 +99,20 @@ app.post("/relay", (req, res) => {
     return res.status(429).send("Queue full");
   }
 
-  const message =
-    "🎟️ **EMARI Gate Log**\n\n" +
-    "**Avatar:** " + sanitize(avatar) + "\n" +
-    "**UUID:** " + sanitize(uuid) + "\n\n" +
-    "**Status:**\n" + sanitize(reason) + "\n\n" +
-    "**Time:** " + sanitize(time);
+  const embed = {
+    title: "🚨 EMARI Gate Alert",
+    color: 0xff0000,
+    fields: [
+      { name: "Avatar", value: sanitize(avatar), inline: true },
+      { name: "UUID", value: sanitize(uuid), inline: true },
+      { name: "Status", value: sanitize(reason) },
+      { name: "Time", value: sanitize(time) }
+    ],
+    footer: { text: "EMARI Relay System" },
+    timestamp: new Date().toISOString()
+  };
 
-  queue.push({ content: message, webhook });
+  queue.push({ embed, webhook });
   processQueue();
 
   res.send("Queued");
