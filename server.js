@@ -1,4 +1,4 @@
-// server.js — EMARI Discord Relay (ANTI-RATE-LIMIT v2)
+// server.js — EMARI Discord Relay (Multi-Webhook Support)
 
 const express = require("express");
 const fetch = require("node-fetch");
@@ -7,22 +7,20 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-const WEBHOOK = process.env.DISCORD_WEBHOOK_URL;
-if (!WEBHOOK) {
-  console.error("❌ DISCORD_WEBHOOK_URL missing");
-  process.exit(1);
-}
+// Map of channel names to webhook URLs
+const WEBHOOKS = {
+  default: process.env.DISCORD_WEBHOOK_URL,
+  security: process.env.DISCORD_WEBHOOK_SECURITY,
+  support: process.env.DISCORD_WEBHOOK_SUPPORT,
+  // Add more channels as needed
+};
 
-// Rate limit and deduplication settings
-const SEND_DELAY_MS = 3000; // 1 message every 3 seconds
+const SEND_DELAY_MS = 3000;
 const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
 let queue = [];
 let sending = false;
 const seen = new Map();
-
-// Optional: IP whitelist
-// const ALLOWED_IPS = ["123.45.67.89", "98.76.54.32"];
 
 function sanitize(text) {
   return String(text)
@@ -35,10 +33,10 @@ async function processQueue() {
   if (sending || queue.length === 0) return;
 
   sending = true;
-  const { content, retries } = queue.shift();
+  const { content, webhook, retries } = queue.shift();
 
   try {
-    const res = await fetch(WEBHOOK, {
+    const res = await fetch(webhook, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content })
@@ -50,7 +48,7 @@ async function processQueue() {
 
       if (retryAfter) {
         console.warn(`⏳ Rate limited. Retrying in ${retryAfter}s`);
-        queue.unshift({ content, retries });
+        queue.unshift({ content, webhook, retries });
         setTimeout(() => {
           sending = false;
           processQueue();
@@ -60,13 +58,13 @@ async function processQueue() {
 
       if (retries < 3) {
         console.warn(`🔁 Retrying (${retries + 1})...`);
-        queue.unshift({ content, retries: retries + 1 });
+        queue.unshift({ content, webhook, retries: retries + 1 });
       }
     }
   } catch (err) {
     console.error("🔥 Send error:", err.message);
     if (retries < 3) {
-      queue.unshift({ content, retries: retries + 1 });
+      queue.unshift({ content, webhook, retries: retries + 1 });
     }
   }
 
@@ -77,21 +75,19 @@ async function processQueue() {
 }
 
 app.get("/", (req, res) => {
-  res.send("✅ EMARI Relay Online");
+  res.send("✅ EMARI Relay Online (Multi-Channel)");
 });
 
 app.post("/relay", (req, res) => {
-  // Optional: IP filtering
-  // const ip = req.headers["x-forwarded-for"] || req.socket.remoteAddress;
-  // if (!ALLOWED_IPS.includes(ip)) {
-  //   console.warn(`⛔ Blocked request from unauthorized IP: ${ip}`);
-  //   return res.status(403).send("Forbidden");
-  // }
-
-  const { avatar, uuid, reason, time } = req.body;
+  const { avatar, uuid, reason, time, channel = "default" } = req.body;
 
   if (!avatar || !uuid || !reason || !time) {
     return res.status(400).send("Invalid payload");
+  }
+
+  const webhook = WEBHOOKS[channel];
+  if (!webhook) {
+    return res.status(400).send("Unknown channel");
   }
 
   const now = Date.now();
@@ -110,7 +106,7 @@ app.post("/relay", (req, res) => {
     "**Status:**\n" + sanitize(reason) + "\n\n" +
     "**Time:** " + sanitize(time);
 
-  queue.push({ content: message, retries: 0 });
+  queue.push({ content: message, webhook, retries: 0 });
   processQueue();
 
   res.send("Queued");
