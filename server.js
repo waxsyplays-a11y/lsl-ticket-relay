@@ -8,7 +8,7 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 const WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
 if (!WEBHOOK_URL) {
