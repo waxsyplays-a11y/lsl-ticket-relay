@@ -15,7 +15,7 @@ const WEBHOOKS = {
   // Add more channels as needed
 };
 
-const SEND_DELAY_MS = 3000;
+const SEND_DELAY_MS = 10000;
 const DEDUPE_WINDOW_MS = 5 * 60 * 1000;
 
 let queue = [];
