@@ -3,7 +3,12 @@ const fetch = require("node-fetch");
 const queue = [];
 let sending = false;
 const SEND_DELAY_MS = 1100;
+const MAX_RETRIES = 5;
+
 const DEFAULT_WEBHOOK = process.env.DISCORD_WEBHOOK_URL;
+const ADMIN_WEBHOOK = process.env.ADMIN_WEBHOOK_URL || null;
+const WEBHOOKS = process.env.DISCORD_WEBHOOKS?.split(",") || [];
+let webhookIndex = 0;
 
 const seen = new Map();
 const COOLDOWN_MS = 5 * 60 * 1000;
@@ -26,8 +31,16 @@ function isValidWebhook(url) {
     url.length < 300;
 }
 
+function getNextWebhook() {
+  if (WEBHOOKS.length === 0) return DEFAULT_WEBHOOK;
+  const hook = WEBHOOKS[webhookIndex];
+  webhookIndex = (webhookIndex + 1) % WEBHOOKS.length;
+  return hook;
+}
+
 function enqueueToWebhook(content, webhook) {
-  queue.push({ content, webhook });
+  const target = isValidWebhook(webhook) ? webhook : getNextWebhook();
+  queue.push({ content, webhook: target, retries: 0 });
   processQueue();
 }
 
@@ -39,15 +52,29 @@ function getQueuePreview() {
   return queue.map((item, i) => ({
     index: i,
     preview: item.content.slice(0, 100),
-    webhook: item.webhook
+    webhook: item.webhook,
+    retries: item.retries
   }));
+}
+
+async function notifyAdmin(message) {
+  if (!ADMIN_WEBHOOK) return;
+  try {
+    await fetch(ADMIN_WEBHOOK, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: message })
+    });
+  } catch (err) {
+    console.warn("⚠️ Failed to notify admin:", err.message);
+  }
 }
 
 async function processQueue() {
   if (sending || queue.length === 0) return;
   sending = true;
 
-  const { content, webhook } = queue.shift();
+  const { content, webhook, retries } = queue.shift();
 
   try {
     const res = await fetch(webhook, {
@@ -64,35 +91,36 @@ async function processQueue() {
         text.includes("cloudflare") &&
         (text.includes("Error 1015") || text.includes("You are being rate limited"));
 
-      if (isCloudflareBlock) {
-        const delay = 10000;
-        console.warn("🛡️ Cloudflare block detected. Retrying in 10s...");
-        queue.unshift({ content, webhook });
+      const retryAfter = res.headers.get("retry-after");
+      const delay = isCloudflareBlock
+        ? 10000
+        : retryAfter
+        ? parseFloat(retryAfter) * 1000
+        : 5000;
+
+      if (retries < MAX_RETRIES) {
+        console.warn(`🛡️ Retry ${retries + 1}/${MAX_RETRIES} in ${delay}ms`);
+        await notifyAdmin(`🛡️ Cloudflare block or rate limit for:\n${content}\nRetrying in ${delay / 1000}s`);
+        queue.unshift({ content, webhook, retries: retries + 1 });
         setTimeout(() => {
           sending = false;
           processQueue();
         }, delay);
-        return;
+      } else {
+        console.error("❌ Max retries reached. Dropping message.");
+        await notifyAdmin(`❌ Dropped message after ${MAX_RETRIES} retries:\n${content}`);
+        sending = false;
+        processQueue();
       }
-
-      if (res.status === 429) {
-        const retryAfter = res.headers.get("retry-after");
-        const delay = retryAfter ? parseFloat(retryAfter) * 1000 : 5000;
-        console.warn(`⏳ Discord rate limit. Retrying in ${delay}ms`);
-        queue.unshift({ content, webhook });
-        setTimeout(() => {
-          sending = false;
-          processQueue();
-        }, delay);
-        return;
-      }
-
-      console.error(`❌ Discord error: ${res.status} → ${text}`);
-    } else {
-      console.log("✅ Message sent");
+      return;
     }
+
+    console.log("✅ Message sent");
   } catch (err) {
     console.error("🔥 Send error:", err.message);
+    if (retries < MAX_RETRIES) {
+      queue.unshift({ content, webhook, retries: retries + 1 });
+    }
   }
 
   setTimeout(() => {
