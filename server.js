@@ -4,7 +4,7 @@ const app = express();
 
 app.use(express.json());
 
-const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1467197651169575096/q75TbQ08LKSwxMd-3Z0I2ARZJvwl_cChD005izkbYSyiMa7QCS6viQm5RyZJrky8YNTH";
+const DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/962111321;kj/q75TbQ08LKSwxMd-3Z0I2ARZJvwl_cChD005izkbYSyiMa7QCS6viQm5RyZJrky8YNTH";
 
 // Function to send with automatic retry on 429
 async function sendToDiscord(payload, retries = 3) {
